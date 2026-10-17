@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>قیمت دستگاه‌ها و قطعات دارویی</title>
+  <style>
+    body { font-family: Tahoma, sans-serif; max-width: 1100px; margin: 20px auto; padding: 0 12px; background: #fafafa; color: #222; }
+    h1 { margin-bottom: 4px; }
+    .box { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 12px 0; }
+    input, select, button { padding: 6px; margin: 4px; font-family: inherit; font-size: 14px; }
+    button { cursor: pointer; }
+    .wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; background: #fff; }
+    th, td { border: 1px solid #ccc; padding: 6px; text-align: center; white-space: nowrap; }
+    th { background: #eee; position: sticky; top: 0; }
+    td.name { text-align: right; white-space: normal; min-width: 180px; }
+    td input.price { width: 90px; }
+    .hint { color: #666; font-size: 13px; }
+    .del { color: #b00; border: none; background: none; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <h1>قیمت دستگاه‌ها و قطعات دارویی</h1>
+  <p class="hint">قیمت هر قلم را خودت وارد کن؛ بقیه‌ی ارزها خودکار حساب می‌شوند. اطلاعات داخل همین مرورگر ذخیره می‌شود.</p>
+
+  <div class="box">
+    <b>نرخ امروز (به ریال):</b><br>
+    <label>دلار: <input type="number" id="rate-usd" oninput="rateChanged()"></label>
+    <label>یورو: <input type="number" id="rate-eur" oninput="rateChanged()"></label>
+    <label>پوند: <input type="number" id="rate-gbp" oninput="rateChanged()"></label>
+  </div>
+
+  <div class="box">
+    <label>دسته:
+      <select id="category" onchange="render()"></select>
+    </label>
+    <label>جستجو:
+      <input type="text" id="search" oninput="render()" placeholder="مثلاً ستون یا HPLC">
+    </label>
+    <label><input type="checkbox" id="onlyPriced" onchange="render()"> فقط اقلام قیمت‌دار</label>
+    <button onclick="exportCSV()">خروجی اکسل (CSV)</button>
+    <span class="hint" id="count"></span>
+  </div>
+
+  <div class="box">
+    <b>افزودن قلم جدید:</b><br>
+    <input type="text" id="newName" placeholder="نام قلم">
+    <input type="text" id="newCat" list="catList" placeholder="دسته">
+    <datalist id="catList"></datalist>
+    <button onclick="addItem()">افزودن</button>
+  </div>
+
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>نام</th>
+          <th>دسته</th>
+          <th>قیمت (ورودی)</th>
+          <th>دلار</th>
+          <th>یورو</th>
+          <th>پوند</th>
+          <th>ریال</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    // لیست اولیه اقلام. قیمت‌ها عمداً خالی هستند.
+    const defaultData = {
+      "QC - کروماتوگرافی": ["HPLC", "UHPLC", "GC (گاز کروماتوگراف)", "GC-Headspace", "LC-MS", "GC-MS", "IC (کروماتوگرافی یونی)", "TLC / HPTLC"],
+      "QC - اسپکتروسکوپی": ["UV-Vis اسپکتروفوتومتر", "FTIR", "جذب اتمی (AAS)", "ICP-OES", "ICP-MS", "فلورسانس", "رامان", "NIR"],
+      "QC - تست‌های فیزیکی": ["Dissolution Tester (انحلال)", "Disintegration Tester (تجزیه قرص)", "Hardness Tester (سختی قرص)", "Friability Tester (سایش قرص)", "Tapped Density (دانسیته)", "Particle Size Analyzer (اندازه ذرات)", "Viscometer (ویسکومتر)", "Melting Point (نقطه ذوب)", "Polarimeter", "Refractometer", "Karl Fischer Titrator", "Moisture Analyzer (رطوبت‌سنج)", "Titrator اتوماتیک", "pH متر", "کنداکتومتر", "TOC آنالایزر", "ترازوی آنالیتیکال", "میکروبالانس"],
+      "میکروبیولوژی": ["اتوکلاو", "انکوباتور", "هود لامینار", "کابینت ایمنی زیستی (BSC)", "Colony Counter", "میکروسکوپ", "Particle Counter (ذره‌شمار هوا)", "Air Sampler"],
+      "پایداری و نگهداری": ["Stability Chamber", "یخچال و فریزر دارویی", "Ultrasonic Bath", "Centrifuge", "آون", "کوره"],
+      "تولید - جامدات": ["میکسر / Blender", "Granulator (گرانول‌ساز)", "Fluid Bed Dryer", "Mill (آسیاب)", "Sifter (الک)", "Tablet Press (پرس قرص)", "Coating Machine (پوشش قرص)", "Capsule Filling Machine", "Deduster", "Metal Detector"],
+      "تولید - مایعات و نیمه‌جامدات": ["راکتور و تانک مخلوط‌کن", "Homogenizer", "Ointment/Cream Manufacturing Vessel", "Tube Filling Machine", "Syrup Filling Line"],
+      "تولید - استریل": ["Vial Washing Machine", "Depyrogenation Tunnel", "Filling و Stoppering Machine", "Lyophilizer (فریز درایر)", "Capping Machine", "Sterilizing Filter Housing"],
+      "بسته‌بندی": ["Blister Machine", "Strip Packing", "Cartoning Machine", "Labeling Machine", "Bottle Filling و Capping", "Serialization و Track & Trace", "Checkweigher"],
+      "تأسیسات": ["سیستم آب RO", "سیستم WFI", "سیستم Purified Water", "HVAC و AHU", "Cleanroom و پاس‌باکس", "کمپرسور هوا", "ژنراتور نیتروژن", "بویلر و Steam Generator", "Chiller"],
+      "قطعات HPLC و GC": ["ستون C18", "ستون C8", "ستون Phenyl", "ستون HILIC", "Guard Column (پیش‌ستون)", "لامپ دتکتور - دوتریوم", "لامپ دتکتور - تنگستن", "Pump Seal", "Piston", "Check Valve", "Injector Rotor Seal", "Needle", "Needle Seat", "Autosampler Syringe", "Inline Filter", "Frit", "لوله و فیتینگ PEEK", "لوله و فیتینگ SS", "ویال", "کپ ویال", "سپتوم ویال", "فیلتر سرنگی 0.22", "فیلتر سرنگی 0.45", "فیلتر غشایی ساخت فاز متحرک", "Septum (GC)", "Liner (GC)", "Ferrule"],
+      "قطعات Dissolution": ["Basket", "Paddle", "Vessel (ظرف)", "Sinker", "Sampling Probe و Filter"],
+      "قطعات اسپکتروفوتومتر": ["کووت کوارتز", "کووت پلاستیکی", "لامپ اسپکتروفوتومتر"],
+      "قطعات و مصرفی عمومی": ["مخزن حلال", "سیلینگ و فیلتر خروجی مخزن", "الکترود pH", "محلول بافر", "استاندارد مرجع", "وزنه کالیبراسیون"],
+      "قطعات تولید": ["Punch و Die (قالب قرص)", "الک و مش", "Blister Foil", "PVC Film", "فیلتر HEPA", "فیلتر هوای تأسیسات"]
+    };
+
+    let nextId = 1;
+    let items = [];
+    let rates = { usd: "", eur: "", gbp: "" };
+    let visible = []; // ردیف‌های نمایش‌داده‌شده: { item, cells }
+
+    function buildDefaults() {
+      const out = [];
+      for (const cat in defaultData) {
+        for (const name of defaultData[cat]) {
+          out.push({ id: nextId++, name: name, category: cat, price: "", cur: "USD" });
+        }
+      }
+      return out;
+    }
+
+    function load() {
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem("pharmaItems")); } catch (e) {}
+      if (Array.isArray(saved) && saved.length) {
+        items = saved;
+        nextId = Math.max.apply(null, items.map(function (i) { return i.id; })) + 1;
+      } else {
+        items = buildDefaults();
+      }
+      let r = null;
+      try { r = JSON.parse(localStorage.getItem("pharmaRates")); } catch (e) {}
+      if (r) rates = r;
+    }
+
+    function save() {
+      try {
+        localStorage.setItem("pharmaItems", JSON.stringify(items));
+        localStorage.setItem("pharmaRates", JSON.stringify(rates));
+      } catch (e) {}
+    }
+
+    function fmt(n, rial) {
+      if (n === null || n === undefined || !isFinite(n)) return "-";
+      if (rial) return Math.round(n).toLocaleString("en-US");
+      return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+    }
+
+    // قیمت قلم را در هر چهار ارز حساب می‌کند
+    function values(item) {
+      const p = Number(item.price);
+      if (!p || p < 0) return null;
+      const r = { USD: Number(rates.usd), EUR: Number(rates.eur), GBP: Number(rates.gbp) };
+      const rateOfInput = item.cur === "IRR" ? 1 : r[item.cur];
+      const rial = rateOfInput ? p * rateOfInput : null;
+      const out = {};
+      ["USD", "EUR", "GBP"].forEach(function (c) {
+        if (item.cur === c) out[c] = p;
+        else out[c] = (rial && r[c]) ? rial / r[c] : null;
+      });
+      out.IRR = item.cur === "IRR" ? p : rial;
+      return out;
+    }
+
+    function updateCells(row) {
+      const v = values(row.item);
+      row.cells.USD.textContent = v ? fmt(v.USD) : "-";
+      row.cells.EUR.textContent = v ? fmt(v.EUR) : "-";
+      row.cells.GBP.textContent = v ? fmt(v.GBP) : "-";
+      row.cells.IRR.textContent = v ? fmt(v.IRR, true) : "-";
+    }
+
+    function updateAllCells() {
+      visible.forEach(updateCells);
+    }
+
+    function rateChanged() {
+      rates.usd = document.getElementById("rate-usd").value;
+      rates.eur = document.getElementById("rate-eur").value;
+      rates.gbp = document.getElementById("rate-gbp").value;
+      save();
+      updateAllCells();
+    }
+
+    function categories() {
+      const set = [];
+      items.forEach(function (i) { if (set.indexOf(i.category) === -1) set.push(i.category); });
+      return set;
+    }
+
+    function refreshCategories() {
+      const sel = document.getElementById("category");
+      const current = sel.value || "همه";
+      sel.innerHTML = "";
+      const all = document.createElement("option");
+      all.value = "همه"; all.textContent = "همه";
+      sel.appendChild(all);
+      const list = document.getElementById("catList");
+      list.innerHTML = "";
+      categories().forEach(function (c) {
+        const o = document.createElement("option");
+        o.value = c; o.textContent = c;
+        sel.appendChild(o);
+        const d = document.createElement("option");
+        d.value = c;
+        list.appendChild(d);
+      });
+      sel.value = categories().indexOf(current) !== -1 ? current : "همه";
+    }
+
+    function td(text, cls) {
+      const t = document.createElement("td");
+      if (text !== undefined) t.textContent = text;
+      if (cls) t.className = cls;
+      return t;
+    }
+
+    function makeRow(item) {
+      const tr = document.createElement("tr");
+      tr.appendChild(td(item.name, "name"));
+      tr.appendChild(td(item.category));
+
+      const priceTd = td();
+      const inp = document.createElement("input");
+      inp.type = "number"; inp.className = "price"; inp.min = "0"; inp.step = "any";
+      inp.value = item.price;
+      const sel = document.createElement("select");
+      [["USD", "دلار"], ["EUR", "یورو"], ["GBP", "پوند"], ["IRR", "ریال"]].forEach(function (c) {
+        const o = document.createElement("option");
+        o.value = c[0]; o.textContent = c[1];
+        sel.appendChild(o);
+      });
+      sel.value = item.cur;
+      priceTd.appendChild(inp);
+      priceTd.appendChild(sel);
+      tr.appendChild(priceTd);
+
+      const cells = { USD: td("-"), EUR: td("-"), GBP: td("-"), IRR: td("-") };
+      tr.appendChild(cells.USD);
+      tr.appendChild(cells.EUR);
+      tr.appendChild(cells.GBP);
+      tr.appendChild(cells.IRR);
+
+      const delTd = td();
+      const del = document.createElement("button");
+      del.className = "del"; del.textContent = "✕"; del.title = "حذف";
+      delTd.appendChild(del);
+      tr.appendChild(delTd);
+
+      const row = { item: item, cells: cells };
+
+      inp.oninput = function () { item.price = inp.value; save(); updateCells(row); };
+      sel.onchange = function () { item.cur = sel.value; save(); updateCells(row); };
+      del.onclick = function () {
+        if (confirm("«" + item.name + "» حذف شود؟")) {
+          items = items.filter(function (i) { return i.id !== item.id; });
+          save();
+          refreshCategories();
+          render();
+        }
+      };
+
+      updateCells(row);
+      return { row: row, tr: tr };
+    }
+
+    function render() {
+      const cat = document.getElementById("category").value || "همه";
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      const onlyPriced = document.getElementById("onlyPriced").checked;
+
+      const tbody = document.getElementById("tbody");
+      tbody.innerHTML = "";
+      visible = [];
+
+      items.forEach(function (item) {
+        if (cat !== "همه" && item.category !== cat) return;
+        if (q && item.name.toLowerCase().indexOf(q) === -1) return;
+        if (onlyPriced && !Number(item.price)) return;
+        const made = makeRow(item);
+        visible.push(made.row);
+        tbody.appendChild(made.tr);
+      });
+
+      document.getElementById("count").textContent = " نمایش " + visible.length + " از " + items.length + " قلم";
+    }
+
+    function addItem() {
+      const name = document.getElementById("newName").value.trim();
+      const cat = document.getElementById("newCat").value.trim() || "سایر";
+      if (!name) { alert("نام قلم را بنویس."); return; }
+      items.push({ id: nextId++, name: name, category: cat, price: "", cur: "USD" });
+      save();
+      document.getElementById("newName").value = "";
+      refreshCategories();
+      render();
+    }
+
+    function exportCSV() {
+      const lines = [["نام", "دسته", "دلار", "یورو", "پوند", "ریال"]];
+      items.forEach(function (item) {
+        const v = values(item);
+        lines.push([
+          item.name, item.category,
+          v && v.USD !== null ? v.USD.toFixed(2) : "",
+          v && v.EUR !== null ? v.EUR.toFixed(2) : "",
+          v && v.GBP !== null ? v.GBP.toFixed(2) : "",
+          v && v.IRR !== null ? Math.round(v.IRR) : ""
+        ]);
+      });
+      const csv = lines.map(function (l) {
+        return l.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(",");
+      }).join("\n");
+      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "prices.csv";
+      a.click();
+    }
+
+    load();
+    document.getElementById("rate-usd").value = rates.usd;
+    document.getElementById("rate-eur").value = rates.eur;
+    document.getElementById("rate-gbp").value = rates.gbp;
+    refreshCategories();
+    render();
+  </script>
+</body>
+</html>
